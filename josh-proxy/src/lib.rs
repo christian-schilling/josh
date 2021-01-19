@@ -462,3 +462,54 @@ impl Drop for TmpGitNamespace {
         });
     }
 }
+
+pub struct PacklineCodec {
+    pub ns: std::sync::Arc<TmpGitNamespace>
+}
+
+impl tokio_util::codec::Decoder for PacklineCodec {
+    type Item = bytes::BytesMut;
+    type Error = std::io::Error;
+
+    fn decode(
+        &mut self,
+        buf: &mut bytes::BytesMut,
+    ) -> Result<Option<bytes::BytesMut>, std::io::Error> {
+        if buf.len() < 4 {
+            return Ok(None);
+        }
+
+        let s = std::str::from_utf8(&buf[..4]).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::Other, "from_utf8")
+        })?;
+        let len = std::cmp::max(
+            4,
+            usize::from_str_radix(s, 16).map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::Other, "from_str_radix")
+            })?,
+        );
+
+        if buf.len() < len {
+            buf.reserve(len);
+            return Ok(None);
+        }
+        let mut r = buf.split_to(len);
+
+        return Ok(Some(r));
+    }
+}
+
+//impl<T> Encoder<T> for PacklineCodec
+//where
+//    T: AsRef<str>,
+//{
+//    type Error = std::io::Error;
+//
+//    fn encode(&mut self, line: T, buf: &mut BytesMut) -> Result<(), std::io::Error> {
+//        let line = line.as_ref();
+//        buf.reserve(line.len() + 1);
+//        buf.put(line.as_bytes());
+//        buf.put_u8(b'\n');
+//        Ok(())
+//    }
+//}

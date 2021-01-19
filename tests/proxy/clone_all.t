@@ -1,6 +1,7 @@
   $ . ${TESTDIR}/setup_test_env.sh
   $ cd ${TESTTMP}
 
+  $ unset GIT_PROTOCOL
   $ git clone -q http://localhost:8001/real_repo.git
   warning: You appear to have cloned an empty repository.
 
@@ -32,9 +33,14 @@
   To http://localhost:8001/real_repo.git
    * [new branch]      master -> master
 
+  $ export GIT_PROTOCOL=version=2
+
   $ cd ${TESTTMP}
 
-  $ git clone -q http://localhost:8002/real_repo.git full_repo
+  $ git clone http://localhost:8002/real_repo.git full_repo
+
+  $ tree remote/scratch
+  $ git-upload-pack --advertise-refs remote/scratch
 
   $ cd full_repo
 
@@ -71,4 +77,5 @@
   `-- tags
   
   14 directories, 3 files
+  $ cat ${TESTTMP}/josh-proxy.out | grep packline
 

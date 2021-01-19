@@ -19,6 +19,8 @@ GIT_DIR=${TESTTMP}/remote/ GIT_PROJECT_ROOT=${TESTTMP}/remote/ GIT_HTTP_EXPORT_A
     > ${TESTTMP}/hyper-cgi-test-server.out 2>&1 &
 echo $! > ${TESTTMP}/server_pid
 
+export GIT_PROTOCOL=version=2
+export JOSH_KEEP_NS=true
 ${TESTDIR}/../../target/debug/josh-proxy\
     --port=8002\
     --local=${TESTTMP}/remote/scratch/\

@@ -1,4 +1,4 @@
-#![deny(warnings)]
+/* #![deny(warnings)] */
 #[macro_use]
 extern crate lazy_static;
 use base64;
@@ -400,6 +400,7 @@ async fn call_service(
         }
     };
 
+
     let mut headref = parsed_url.headref.trim_start_matches("@").to_owned();
     if headref == "" {
         headref = "refs/heads/master".to_string();
@@ -427,6 +428,40 @@ async fn call_service(
         PrepareNsResult::Ns(temp_ns) => temp_ns,
         PrepareNsResult::Resp(resp) => return Ok(resp),
     };
+
+    if parsed_url.pathinfo == "/info/refs" {
+        if req
+            .headers()
+            .get("git-protocol")
+            .map(|x| x.to_str().ok())
+            .flatten()
+            != Some("version=2")
+        {
+            return Ok(Response::builder()
+                .status(hyper::StatusCode::BAD_REQUEST)
+                .body(hyper::Body::empty())?);
+        }
+
+        let mut cmd = Command::new("git");
+        cmd.arg("http-backend");
+        cmd.current_dir(&serv.repo_path);
+        cmd.env("GIT_DIR", &serv.repo_path);
+        cmd.env("GIT_PROJECT_ROOT", &serv.repo_path);
+        cmd.env("GIT_PROTOCOL", &"version=2");
+        cmd.env("GIT_HTTP_EXPORT_ALL", "");
+        cmd.env("QUERY_STRING", req.uri().query().unwrap_or(""));
+        cmd.env("PATH_INFO", parsed_url.pathinfo.clone());
+
+        let cgires = hyper_cgi::do_cgi(req, cmd)
+            .instrument(tracing::span!(
+                tracing::Level::TRACE,
+                "git http-backend"
+            ))
+            .await
+            .0;
+
+        return Ok(cgires);
+    }
 
     if req.uri().query() == Some("info") {
         let info_str =
@@ -479,6 +514,71 @@ async fn call_service(
         }
     }
 
+    if parsed_url.pathinfo == "/git-upload-pack" {
+        let mut cmd = Command::new("git-upload-pack");
+        cmd.current_dir(&serv.repo_path);
+        cmd.arg("--stateless-rpc");
+        cmd.arg(&serv.repo_path);
+        cmd.env("GIT_PROTOCOL", &"version=2");
+        cmd.env("GIT_NAMESPACE", temp_ns.name().clone());
+
+        cmd.stdout(std::process::Stdio::piped());
+        /* cmd.stderr(std::process::Stdio::piped()); */
+        cmd.stdin(std::process::Stdio::piped());
+
+        use futures::TryStreamExt;
+        use std::iter::Iterator;
+
+        use futures::FutureExt;
+        use futures::StreamExt;
+
+        let child = cmd.spawn().unwrap();
+        let mut stdin = child.stdin.unwrap();
+        let mut stdout = child.stdout.unwrap();
+        let body = req
+            .into_body()
+            .map(|result| {
+                result.map_err(|_error| {
+                    std::io::Error::new(std::io::ErrorKind::Other, "Error!")
+                })
+            })
+            .into_async_read();
+
+        let mut body =
+            tokio_util::compat::FuturesAsyncReadCompatExt::compat(body);
+
+        let st =
+            tokio_util::codec::FramedRead::new(body, josh_proxy::PacklineCodec{ ns: temp_ns.clone()} )
+                .map_ok(|x| {
+                    println!("packline-in {:?}", x);
+                    x
+                })
+                .map_ok(bytes::BytesMut::freeze)
+                .into_async_read();
+
+        let mut st = tokio_util::compat::FuturesAsyncReadCompatExt::compat(st);
+
+        tokio::io::copy(&mut st, &mut stdin).await;
+
+        let st = tokio_util::codec::FramedRead::new(
+            stdout,
+            josh_proxy::PacklineCodec { ns: temp_ns.clone() },
+        )
+        .map_ok(|x| {
+            println!("packline-out {:?}", x);
+            x
+        })
+        .map_ok(bytes::BytesMut::freeze);
+
+        return Ok(Response::builder()
+            .status(hyper::StatusCode::OK)
+            .header(
+                "content-type",
+                "application/x-git-upload-pack-advertisement",
+            )
+            .body(hyper::Body::wrap_stream(st))?);
+    }
+
     let repo_update = josh_proxy::RepoUpdate {
         refs: HashMap::new(),
         remote_url: remote_url.clone(),
@@ -497,6 +597,8 @@ async fn call_service(
     cmd.env("GIT_DIR", repo_path);
     cmd.env("GIT_HTTP_EXPORT_ALL", "");
     cmd.env("GIT_NAMESPACE", temp_ns.name().clone());
+    cmd.env("QUERY_STRING", req.uri().query().unwrap_or(""));
+    cmd.env("GIT_PROTOCOL", &"version=2");
     cmd.env("GIT_PROJECT_ROOT", repo_path);
     cmd.env("JOSH_REPO_UPDATE", serde_json::to_string(&repo_update)?);
     cmd.env("PATH_INFO", parsed_url.pathinfo.clone());

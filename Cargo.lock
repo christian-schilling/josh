@@ -756,6 +756,7 @@ name = "josh-proxy"
 version = "0.3.0"
 dependencies = [
  "base64",
+ "bytes",
  "clap",
  "futures",
  "git2",
@@ -771,6 +772,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "tracing-futures",

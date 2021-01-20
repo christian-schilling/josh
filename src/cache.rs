@@ -51,12 +51,12 @@ struct Transaction2 {
     sled_trees: HashMap<git2::Oid, sled::Tree>,
     misses: usize,
     walks: usize,
+    out: Box<dyn std::io::Write>,
 }
 
 pub struct Transaction {
     t2: std::cell::RefCell<Transaction2>,
     repo: git2::Repository,
-    pub out: Box<dyn std::io::Write>,
 }
 
 impl Transaction {
@@ -107,9 +107,9 @@ impl Transaction {
                 sled_trees: HashMap::new(),
                 misses: 0,
                 walks: 0,
+                out: out,
             }),
             repo: repo,
-            out: out,
         }
     }
 

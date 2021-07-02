@@ -90,47 +90,21 @@
    * [new branch]      master -> master
 
   $ python3 ${TESTDIR}/test.py
-  real_repo
-  success
+  Traceback (most recent call last):
+    File "/Users/christian/code/esr/josh/tests/ui/test.py", line 21, in <module>
+      wait.until(presence_of_element_located((By.CSS_SELECTOR, "#repo")))
+    File "/usr/local/lib/python3.9/site-packages/selenium/webdriver/support/wait.py", line 80, in until
+      raise TimeoutException(message, screen, stacktrace)
+  selenium.common.exceptions.TimeoutException: Message: 
+  
+  [1]
   $ sh ${TESTDIR}/compare_screenshots.sh . ${TESTDIR}/screenshots
+  /Users/christian/code/esr/josh/tests/ui/compare_screenshots.sh: line 8: sha256sum: command not found
+  /Users/christian/code/esr/josh/tests/ui/compare_screenshots.sh: line 9: sha256sum: command not found
 $ cat ${TESTDIR}/geckodriver.log
   $ bash ${TESTDIR}/../proxy/destroy_test_env.sh
-  "real_repo.git" = [
-      ':/sub1',
-      ':/sub1/subsub',
-      ':/sub2',
-      ':/sub3',
-      ':/ws',
-      ':workspace=ws',
-  ]
   refs
   |-- heads
-  |-- josh
-  |   |-- filtered
-  |   |   `-- real_repo.git
-  |   |       |-- %3A%2Fsub1
-  |   |       |   `-- heads
-  |   |       |       `-- master
-  |   |       |-- %3A%2Fsub1%2Fsubsub
-  |   |       |   `-- heads
-  |   |       |       `-- master
-  |   |       |-- %3A%2Fsub2
-  |   |       |   `-- heads
-  |   |       |       `-- master
-  |   |       |-- %3A%2Fsub3
-  |   |       |   `-- heads
-  |   |       |       `-- master
-  |   |       |-- %3A%2Fws
-  |   |       |   `-- heads
-  |   |       |       `-- master
-  |   |       `-- %3Aworkspace=ws
-  |   |           `-- heads
-  |   |               `-- master
-  |   `-- upstream
-  |       `-- real_repo.git
-  |           `-- refs
-  |               `-- heads
-  |                   `-- master
   `-- tags
   
-  21 directories, 7 files
+  2 directories, 0 files

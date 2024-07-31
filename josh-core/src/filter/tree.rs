@@ -55,6 +55,130 @@ pub fn pathstree<'a>(
     Ok(result)
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum DocFormat {
+    Json,
+    Yaml,
+    Toml,
+}
+
+pub fn doc2tree<'a>(
+    transaction: &'a cache::Transaction,
+    tree: git2::Tree<'a>,
+    format: DocFormat,
+) -> super::JoshResult<git2::Tree<'a>> {
+    let repo = transaction.repo();
+    let mut result = tree::empty(repo);
+
+    for entry in tree.iter() {
+        let name = entry.name().ok_or(super::josh_error("no name"))?;
+        if entry.kind() == Some(git2::ObjectType::Blob) {
+            let file_contents = get_blob(repo, &tree, std::path::Path::new(&name));
+
+            let jsonvalue = match format {
+                DocFormat::Yaml => serde_yaml::from_str(&file_contents)?,
+                DocFormat::Json => serde_json::from_str(&file_contents)?,
+                DocFormat::Toml => toml::de::from_str(&file_contents)?,
+            };
+
+            let gittree = json2git(transaction, jsonvalue)?;
+
+            result = replace_child(
+                repo,
+                std::path::Path::new(name),
+                gittree,
+                0o0040000,
+                &result,
+            )?;
+        }
+
+        if entry.kind() == Some(git2::ObjectType::Tree) {
+            let s = doc2tree(transaction, repo.find_tree(entry.id())?, format)?.id();
+
+            if s != tree::empty_id() {
+                result = replace_child(repo, std::path::Path::new(name), s, 0o0040000, &result)?;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+fn json2git(
+    transaction: &cache::Transaction,
+    value: serde_json::Value,
+) -> super::JoshResult<git2::Oid> {
+    let mut result = tree::empty_id();
+
+    if let Some((t, v)) = match value.clone() {
+        serde_json::Value::Null => Some(("null", "null".to_string())),
+        serde_json::Value::Number(n) => Some(("number", n.to_string())),
+        serde_json::Value::String(s) => Some(("string", s.to_string())),
+        serde_json::Value::Bool(b) => Some(("bool", b.to_string())),
+        _ => None,
+    } {
+        let v = transaction.repo().blob(v.as_bytes())?;
+        result = replace_child(
+            transaction.repo(),
+            std::path::Path::new(t),
+            v,
+            0o0100644,
+            &transaction.repo().find_tree(result)?,
+        )?
+        .id();
+    }
+
+    if let Some((_t, v)) = match value.clone() {
+        serde_json::Value::Object(o) => Some(("object", o)),
+        _ => None,
+    } {
+        for (k, v) in v.iter() {
+            result = replace_child(
+                transaction.repo(),
+                std::path::Path::new(k),
+                json2git(transaction, v.clone())?,
+                0o0040000,
+                &transaction.repo().find_tree(result)?,
+            )?
+            .id();
+        }
+        result = replace_child(
+            transaction.repo(),
+            std::path::Path::new("object"),
+            result,
+            0o0040000,
+            &tree::empty(transaction.repo()),
+        )?
+        .id();
+    }
+
+    if let Some((_t, v)) = match value {
+        serde_json::Value::Array(o) => Some(("array", o)),
+        _ => None,
+    } {
+        for (k, v) in v.iter().enumerate() {
+            result = replace_child(
+                transaction.repo(),
+                std::path::Path::new(&k.to_string()),
+                json2git(transaction, v.clone())?,
+                0o0040000,
+                &transaction.repo().find_tree(result)?,
+            )?
+            .id();
+        }
+        result = replace_child(
+            transaction.repo(),
+            std::path::Path::new("array"),
+            result,
+            0o0040000,
+            &tree::empty(transaction.repo()),
+        )?
+        .id();
+    }
+
+    Ok(result)
+}
+
 pub fn regex_replace<'a>(
     input: git2::Oid,
     regex: &regex::Regex,

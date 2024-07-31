@@ -150,6 +150,8 @@ enum Op {
 
     Index,
     Invert,
+    Json,
+    Yaml,
 
     File(std::path::PathBuf),
     Prefix(std::path::PathBuf),
@@ -474,6 +476,8 @@ fn spec2(op: &Op) -> String {
         Op::Paths => ":PATHS".to_string(),
         Op::Invert => ":INVERT".to_string(),
         Op::Index => ":INDEX".to_string(),
+        Op::Json => ":json".to_string(),
+        Op::Yaml => ":yaml".to_string(),
         Op::Fold => ":FOLD".to_string(),
         Op::Squash(None) => ":SQUASH".to_string(),
         Op::Squash(Some(ids)) => {
@@ -1062,6 +1066,8 @@ fn apply2<'a>(
 
         Op::Paths => tree::pathstree("", tree.id(), transaction),
         Op::Index => tree::trigram_index(transaction, tree),
+        Op::Json => tree::doc2tree(transaction, tree, tree::DocFormat::Json),
+        Op::Yaml => tree::doc2tree(transaction, tree, tree::DocFormat::Yaml),
 
         Op::Invert => tree::invert_paths(transaction, "", tree),
 

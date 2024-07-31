@@ -35,6 +35,8 @@ fn make_op(args: &[&str]) -> JoshResult<Op> {
         ["SQUASH"] => Ok(Op::Squash(None)),
         ["SQUASH", _ids @ ..] => Err(josh_error("SQUASH with ids can't be parsed")),
         ["linear"] => Ok(Op::Linear),
+        ["json"] => Ok(Op::Json),
+        ["yaml"] => Ok(Op::Yaml),
         ["unsign"] => Ok(Op::Unsign),
         ["PATHS"] => Ok(Op::Paths),
         ["INDEX"] => Ok(Op::Index),

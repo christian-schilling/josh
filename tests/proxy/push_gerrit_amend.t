@@ -27,16 +27,16 @@
   * Change-Id: 1234  (HEAD -> master)
   * add files  (origin/master, origin/HEAD)
   $ git push -o author=josh@example.com origin master:refs/for/master
-  remote: josh-proxy        
-  remote: response from upstream:        
+  remote: josh-proxy: pre-receive hook        
+  remote: upstream: response status: 200 OK        
+  remote: upstream: response body:        
+  remote: 
   remote: To http://localhost:8001/real_repo.git        
   remote:  * [new branch]      1234 -> @changes/master/josh@example.com/1234        
   remote: To http://localhost:8001/real_repo.git        
   remote:  * [new reference]   JOSH_PUSH -> refs/for/master        
   remote: To http://localhost:8001/real_repo.git        
   remote:  * [new branch]      master -> @heads/master/josh@example.com        
-  remote: 
-  remote: 
   To http://localhost:8002/real_repo.git:/sub1.git
    * [new reference]   master -> refs/for/master
 
@@ -67,8 +67,10 @@
   To http://localhost:8001/real_repo.git
    - [deleted]         refs/for/master
   $ git push -o author=josh@example.com origin master:refs/for/master
-  remote: josh-proxy        
-  remote: response from upstream:        
+  remote: josh-proxy: pre-receive hook        
+  remote: upstream: response status: 200 OK        
+  remote: upstream: response body:        
+  remote: 
   remote: Everything up-to-date        
   remote: To http://localhost:8001/real_repo.git        
   remote:  + 9b69fe2...920a7be 1234 -> @changes/master/josh@example.com/1234 (forced update)        
@@ -76,8 +78,6 @@
   remote:  * [new reference]   JOSH_PUSH -> refs/for/master        
   remote: To http://localhost:8001/real_repo.git        
   remote:  + 9b69fe2...920a7be master -> @heads/master/josh@example.com (forced update)        
-  remote: 
-  remote: 
   To http://localhost:8002/real_repo.git:/sub2.git
    * [new reference]   master -> refs/for/master
 

@@ -1803,6 +1803,7 @@ dependencies = [
  "serde_yaml",
  "sled",
  "strfmt",
+ "toml",
  "tracing",
 ]
 

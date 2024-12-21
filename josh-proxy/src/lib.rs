@@ -120,6 +120,44 @@ pub struct PushOptions {
     pub author: Option<String>,
 }
 
+pub fn resolve_ref(
+    transaction: &josh::cache::Transaction,
+    repo: &str,
+    ref_value: &str,
+) -> JoshResult<git2::Oid> {
+    let josh_name = ["refs", "josh", "upstream", &josh::to_ns(repo), ref_value]
+        .iter()
+        .collect::<PathBuf>();
+
+    Ok(transaction
+        .repo()
+        .find_reference(josh_name.to_str().unwrap())
+        .map_err(|e| josh_error(&format!("Could not find ref: {}", e)))?
+        .target()
+        .ok_or(josh_error("Could not resolve ref"))?)
+}
+
+pub fn resolve_lazy_refs(
+    transaction: &josh::cache::Transaction,
+    filter: josh::filter::Filter,
+) -> josh::JoshResult<josh::filter::Filter> {
+    let lazy_refs: Vec<_> = josh::filter::lazy_refs(filter)
+        .iter()
+        .map(|x| x.split_once("@").unwrap())
+        .map(|(x, y)| (x.to_string(), y.to_string()))
+        .collect();
+
+    let resolved_refs = lazy_refs
+        .iter()
+        .map(|(rp, rf)| -> josh::JoshResult<_> {
+            Ok((format!("{}@{}", rp, rf), resolve_ref(&transaction, rp, rf)?))
+        })
+        .collect::<josh::JoshResult<_>>()?;
+
+    let filter = josh::filter::resolve_refs(&resolved_refs, filter);
+    Ok(filter)
+}
+
 impl Default for PushOptions {
     fn default() -> Self {
         PushOptions {
@@ -269,6 +307,7 @@ pub fn process_repo_update(repo_update: RepoUpdate) -> josh::JoshResult<String> 
         }
 
         let filter = josh::filter::parse(&repo_update.filter_spec)?;
+        let filter = resolve_lazy_refs(&transaction_mirror, filter)?;
         let new_oid = git2::Oid::from_str(new)?;
         let backward_new_oid = {
             let unapply_result = josh::history::unapply_filter(

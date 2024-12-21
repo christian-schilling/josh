@@ -402,23 +402,6 @@ async fn repo_update_fn(req: Request<hyper::Body>) -> josh::JoshResult<Response<
     }?)
 }
 
-fn resolve_ref(
-    transaction: &josh::cache::Transaction,
-    repo: &str,
-    ref_value: &str,
-) -> JoshResult<git2::Oid> {
-    let josh_name = ["refs", "josh", "upstream", &josh::to_ns(repo), ref_value]
-        .iter()
-        .collect::<PathBuf>();
-
-    Ok(transaction
-        .repo()
-        .find_reference(josh_name.to_str().unwrap())
-        .map_err(|e| josh_error(&format!("Could not find ref: {}", e)))?
-        .target()
-        .ok_or(josh_error("Could not resolve ref"))?)
-}
-
 #[tracing::instrument(skip(service))]
 async fn do_filter(
     repo_path: std::path::PathBuf,
@@ -448,29 +431,12 @@ async fn do_filter(
             )),
         )?;
 
-        let lazy_refs: Vec<_> = josh::filter::lazy_refs(filter)
-            .iter()
-            .map(|x| x.split_once("@").unwrap())
-            .map(|(x, y)| (x.to_string(), y.to_string()))
-            .collect();
-
-        let resolved_refs = lazy_refs
-            .iter()
-            .map(|(rp, rf)| {
-                (
-                    format!("{}@{}", rp, rf),
-                    resolve_ref(&transaction, rp, rf).unwrap(),
-                )
-            })
-            .collect();
-
-        let filter = josh::filter::resolve_refs(&resolved_refs, filter);
-
+        let filter = josh_proxy::resolve_lazy_refs(&transaction, filter)?;
         let (refs_list, head_ref) = match &head_ref {
             HeadRef::Explicit(ref_value)
                 if ref_value.starts_with("refs/") || ref_value == "HEAD" =>
             {
-                let object = resolve_ref(&transaction, &meta.config.repo, &ref_value)?;
+                let object = josh_proxy::resolve_ref(&transaction, &meta.config.repo, &ref_value)?;
                 let list = vec![(ref_value.clone(), object)];
 
                 (list, ref_value.clone())
@@ -490,7 +456,9 @@ async fn do_filter(
                     josh::housekeeping::list_refs(transaction.repo(), &meta.config.repo)?;
 
                 let head_ref = head_ref.get().to_string();
-                if let Ok(object) = resolve_ref(&transaction, &meta.config.repo, &head_ref) {
+                if let Ok(object) =
+                    josh_proxy::resolve_ref(&transaction, &meta.config.repo, &head_ref)
+                {
                     list.push((head_ref.clone(), object));
                 }
 
@@ -1302,8 +1270,6 @@ async fn call_service(
 
     fetch_repos.extend(lazy_refs.iter().map(|(x, _y)| x.clone()));
 
-    ///////////////
-
     let remote_url = upstream.clone() + meta.config.repo.as_str();
     let headref = head_ref_or_default(&parsed_url.headref);
 
@@ -1383,8 +1349,6 @@ async fn call_service(
             }
         }
     }
-
-    //////////////
 
     if let (Some(q), true) = (
         req.uri().query().map(|x| x.to_string()),

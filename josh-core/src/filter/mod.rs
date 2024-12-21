@@ -142,6 +142,7 @@ enum Op {
     // We use BTreeMap rather than HashMap to guarantee deterministic results when
     // converting to Filter
     Rev(std::collections::BTreeMap<LazyRef, Filter>),
+    Stored(LazyRef, Filter),
     Join(std::collections::BTreeMap<LazyRef, Filter>),
     Linear,
     Unsign,
@@ -262,6 +263,7 @@ fn nesting2(op: &Op) -> usize {
         Op::Compose(filters) => 1 + filters.iter().map(|f| nesting(*f)).fold(0, |a, b| a.max(b)),
         Op::Exclude(filter) => 1 + nesting(*filter),
         Op::Workspace(_) => usize::MAX / 2, // divide by 2 to make sure there is enough headroom to avoid overflows
+        Op::Stored(_, _) => usize::MAX / 2, // divide by 2 to make sure there is enough headroom to avoid overflows
         Op::Chain(a, b) => 1 + nesting(*a).max(nesting(*b)),
         Op::Subtract(a, b) => 1 + nesting(*a).max(nesting(*b)),
         Op::Rev(filters) => {
@@ -309,6 +311,7 @@ fn lazy_refs2(op: &Op) -> Vec<String> {
             av
         }
         Op::Rev(filters) => lazy_refs2(&Op::Join(filters.clone())),
+        Op::Squash(Some(filters)) => lazy_refs2(&Op::Join(filters.clone())),
         Op::Join(filters) => {
             let mut lr = lazy_refs2(&Op::Compose(filters.values().map(|x| *x).collect()));
             lr.extend(filters.keys().filter_map(|x| {
@@ -320,15 +323,11 @@ fn lazy_refs2(op: &Op) -> Vec<String> {
             }));
             lr
         }
-        Op::Squash(Some(revs)) => {
-            let mut lr = vec![];
-            lr.extend(revs.keys().filter_map(|x| {
-                if let LazyRef::Lazy(s) = x {
-                    Some(s.to_owned())
-                } else {
-                    None
-                }
-            }));
+        Op::Stored(r, f) => {
+            let mut lr = lazy_refs(*f);
+            if let LazyRef::Lazy(s) = r {
+                lr.push(s.to_owned());
+            }
             lr
         }
         _ => vec![],
@@ -370,6 +369,19 @@ fn resolve_refs2(refs: &std::collections::HashMap<String, git2::Oid>, op: &Op) -
                 })
                 .collect();
             Op::Rev(lr)
+        }
+        Op::Stored(r, f) => {
+            let f = resolve_refs(refs, *f);
+            let (r, f) = if let LazyRef::Lazy(s) = r {
+                if let Some(res) = refs.get(s) {
+                    (LazyRef::Resolved(*res), f)
+                } else {
+                    (r.clone(), f)
+                }
+            } else {
+                (r.clone(), f)
+            };
+            Op::Stored(r, f)
         }
         Op::Join(filters) => {
             let lr = filters
@@ -435,6 +447,9 @@ fn spec2(op: &Op) -> String {
         Op::Exclude(b) => {
             format!(":exclude[{}]", spec(*b))
         }
+        Op::Stored(lr, f) => {
+            format!(":filter({}{})", lr.to_string(), spec(*f))
+        }
         Op::Rev(filters) => {
             let mut v = filters
                 .iter()
@@ -444,11 +459,10 @@ fn spec2(op: &Op) -> String {
             format!(":rev({})", v.join(","))
         }
         Op::Join(filters) => {
-            let mut v = filters
+            let v = filters
                 .iter()
                 .map(|(k, v)| format!("{}{}", k.to_string(), spec(*v)))
                 .collect::<Vec<_>>();
-            v.sort();
             format!(":join({})", v.join(","))
         }
         Op::Workspace(path) => {
@@ -644,6 +658,24 @@ fn apply_to_commit2(
                 Ok(Some(git2::Oid::zero()))
             };
         }
+        Op::Stored(lr, f) => {
+            let stored_filter = if let LazyRef::Resolved(o) = lr {
+                let fc = repo.find_commit(*o)?;
+                let ft = apply(transaction, *f, fc.tree()?)?;
+                let filter_blob = tree::get_blob(repo, &ft, &Path::new("filter.josh"));
+                filter::parse(&filter_blob)?
+            } else {
+                return Err(josh_error("apply stored filter: unresolved LazyRef"));
+            };
+
+            let r = some_or!(
+                apply_to_commit2(&to_op(stored_filter), commit, transaction)?,
+                {
+                    return Ok(None);
+                }
+            );
+            return Ok(Some(r));
+        }
         Op::Squash(None) => {
             return Some(history::rewrite_commit(
                 repo,
@@ -667,7 +699,7 @@ fn apply_to_commit2(
             let mut result = commit.id();
             for (&ref combine_tip, f) in refs.iter() {
                 if let LazyRef::Resolved(combine_tip) = combine_tip {
-                    let old = some_or!(transaction.get(*f, commit.id()), {
+                    let old = some_or!(apply_to_commit2(&to_op(*f), commit, transaction)?, {
                         return Ok(None);
                     });
                     result = history::unapply_filter(
@@ -684,7 +716,6 @@ fn apply_to_commit2(
                     return Err(josh_error("unresolved lazy ref"));
                 }
             }
-            transaction.insert(filter, commit.id(), result, true);
             return Ok(Some(result));
         }
         _ => {
@@ -772,7 +803,6 @@ fn apply_to_commit2(
                     author: author,
                     committer: committer,
                 }
-                //commit.tree()?
             } else {
                 if let Some(parent) = commit.parents().next() {
                     return Ok(
@@ -1012,6 +1042,7 @@ fn apply2<'a>(
         Op::Linear => Ok(tree),
         Op::Unsign => Ok(tree),
         Op::Rev(_) => Err(josh_error("not applicable to tree")),
+        Op::Stored(_, _) => Err(josh_error("not applicable to tree")),
         Op::Join(_) => Err(josh_error("not applicable to tree")),
         Op::RegexReplace(replacements) => {
             let mut t = tree;
@@ -1159,6 +1190,20 @@ fn unapply_workspace<'a>(
     parent_tree: git2::Tree<'a>,
 ) -> JoshResult<Option<git2::Tree<'a>>> {
     return match op {
+        Op::Stored(lr, f) => {
+            let stored_filter = if let LazyRef::Resolved(o) = lr {
+                let fc = transaction.repo().find_commit(*o)?;
+                let ft = apply(transaction, *f, fc.tree()?)?;
+                let filter_blob =
+                    tree::get_blob(transaction.repo(), &ft, &Path::new("filter.josh"));
+                filter::parse(&filter_blob)?
+            } else {
+                return Err(josh_error("unapply stored filter: unresolved LazyRef"));
+            };
+
+            let r = unapply(transaction, stored_filter, tree, parent_tree)?;
+            Ok(Some(r))
+        }
         Op::Workspace(path) => {
             let tree = pre_process_tree(transaction.repo(), tree)?;
             let workspace = get_workspace(transaction.repo(), &tree, Path::new(""));

@@ -130,6 +130,18 @@ fn parse_item(pair: pest::iterators::Pair<Rule>) -> JoshResult<Op> {
 
             Ok(Op::Rev(hm))
         }
+        Rule::filter_stored => {
+            let v: Vec<_> = pair.into_inner().map(|x| x.as_str()).collect();
+
+            if let Some((lr, f)) = v.iter().tuples().next() {
+                let lr = LazyRef::parse(lr)?;
+                let f = parse(f)?;
+
+                Ok(Op::Stored(lr, f))
+            } else {
+                return Err(josh_error("parse error for stored filter"));
+            }
+        }
         Rule::filter_replace => {
             let replacements = pair
                 .into_inner()
